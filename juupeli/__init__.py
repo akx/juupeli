@@ -2,7 +2,9 @@ import xml.etree.ElementTree as et
 from collections import namedtuple
 from dataclasses import dataclass, replace, field, asdict, is_dataclass
 from enum import Enum
-from typing import List, Any, Optional, Union, Callable
+from typing import List, Any, Optional, Union, Callable, Set, Iterable
+
+INFO_ANNOTATION_PROPERTY = "__juupeli_info"
 
 
 class Type(Enum):
@@ -23,6 +25,11 @@ class Attribute(namedtuple("_Attribute", ("key", "value"))):
     value: str
 
 
+@dataclass
+class InfoAnnotation:
+    as_attributes: Set[str] = field(default_factory=set)
+
+
 @dataclass(frozen=True)
 class ContextEntry:
     type: Type
@@ -34,6 +41,10 @@ class ContextEntry:
         if self.type in ITEM_TYPES:
             return self.object[0]
         return None
+
+    @property
+    def info_annotation(self) -> Optional[InfoAnnotation]:
+        return getattr(self.object, INFO_ANNOTATION_PROPERTY, None)
 
 
 @dataclass(frozen=True)
@@ -65,10 +76,13 @@ class Context:
         return self.ancestry[-1].key
 
 
-class Codec:
+EncodeResult = List[Union[et.Element, Attribute]]
+
+
+class BaseCodec:
     type_encoders = {}
 
-    def encode(self, obj, *, context=Context()) -> List[Union[et.Element, Attribute]]:
+    def encode(self, obj, *, context=Context()) -> EncodeResult:
         encoder = self.get_element_encoder(obj, context=context)
         if encoder:
             return encoder(obj, context=context)
@@ -89,7 +103,7 @@ class Codec:
         if isinstance(obj, object):
             return self.encode_object
 
-    def encode_list(self, lst: list, *, context: Context) -> List[et.Element]:
+    def encode_list(self, lst: list, *, context: Context) -> EncodeResult:
         return self._encode_container(
             lst,
             root_getter=self.get_list_root,
@@ -99,7 +113,7 @@ class Codec:
             context=context,
         )
 
-    def encode_dict(self, dct: dict, *, context: Context) -> List[et.Element]:
+    def encode_dict(self, dct: dict, *, context: Context) -> EncodeResult:
         return self._encode_container(
             dct,
             root_getter=self.get_dict_root,
@@ -109,7 +123,7 @@ class Codec:
             context=context,
         )
 
-    def encode_object(self, obj, *, context: Context) -> List[et.Element]:
+    def encode_object(self, obj, *, context: Context) -> EncodeResult:
         if is_dataclass(obj):
             mapping_getter = lambda d: asdict(d).items()
         else:
@@ -186,7 +200,7 @@ class Codec:
 
         return et.Element(tag)
 
-    def get_object_root(self, *, context: Context):
+    def get_object_root(self, *, context: Context) -> Union[et.Element, list, None]:
         tag = "object"
         if context.curr_type == Type.OBJECT:
             obj = context.curr_object
@@ -196,7 +210,7 @@ class Codec:
     def encode_default(self, obj, *, context: Context) -> List[et.Element]:
         raise NotImplementedError(f"Encoding {obj} (type {type(obj)} not supported")
 
-    def encode_primitive(self, obj, *, context: Context) -> List[et.Element]:
+    def encode_primitive(self, obj, *, context: Context) -> EncodeResult:
         if context.curr_type in ITEM_TYPES:
             el = et.Element(self.get_primitive_item_tag(obj, context=context))
             el.text = str(obj)
@@ -211,15 +225,45 @@ class Codec:
         return str(context.curr_key)
 
 
-DEFAULT_CODEC = Codec()
+class DefaultCodec(BaseCodec):
+    def encode_dict(self, dct: dict, *, context: Context) -> EncodeResult:
+        if context.parent_entry:
+            info = context.parent_entry.info_annotation
+            if info and context.curr_key in info.as_attributes:
+                return list(self.encode_attribute_dict(dct, context=context))
+
+        return super().encode_dict(dct, context=context)
+
+    def encode_primitive(self, obj, *, context: Context) -> EncodeResult:
+        if context.parent_entry:
+            info = context.parent_entry.info_annotation
+            if info and context.curr_key in info.as_attributes:
+                return Attribute(context.curr_key, str(obj))
+        return super().encode_primitive(obj, context=context)
+
+    def encode_attribute_dict(
+        self, dct: dict, *, context: Context
+    ) -> Iterable[Attribute]:
+        for key, value in dct.items():
+            yield Attribute(str(key), str(value))
 
 
-def to_xml_string(obj, codec: Codec = None, root_tag: str = "document") -> str:
+def to_xml_string(obj, codec: BaseCodec = None, root_tag: str = "document") -> str:
     if codec is None:
-        codec = DEFAULT_CODEC
+        codec = DefaultCodec()
     els = codec.encode(obj)
     if len(els) > 1:
         root = et.Element(root_tag)
         root.extend(els)
         els = [root]
     return et.tostring(els[0], encoding="unicode")
+
+
+def annotate(**info_kwargs):
+    info = InfoAnnotation(**info_kwargs)
+
+    def decorator(obj):
+        setattr(obj, INFO_ANNOTATION_PROPERTY, info)
+        return obj
+
+    return decorator
