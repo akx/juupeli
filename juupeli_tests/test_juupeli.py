@@ -21,3 +21,25 @@ class CustomCodec(Codec):
 def test_posankka(codec):
     person = get_posankka()
     print(prettify_xml(to_xml_string(person, codec=codec)))
+
+
+def test_no_instances():
+    # TODO: This will result (somewhat buggily) in
+    #       ...
+    #       <adjectives>
+    #       	<element>hernekeitto</element>
+    #       	<element>viina</element>
+    #       	<element>teline</element>
+    #       	<element>johannes</element>
+    #       </adjectives>
+    #       ...
+    thing = [
+        {
+            "hello": "world",
+            "adjectives": {"hernekeitto", ("viina", "teline"), "johannes"},
+        },
+        [1, 2, 4, "hello", {"nnep": "pen"}],
+        "aha!",
+    ]
+    xml = prettify_xml(to_xml_string(thing))
+    print(xml)

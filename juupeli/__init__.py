@@ -167,16 +167,18 @@ class Codec:
                     root.append(obj)
 
     def get_list_root(self, *, context: Context) -> Union[et.Element, list, None]:
-        if (
-            context.parent_entry.type in KEYED_ITEM_TYPES
-        ):  # Encoding a list within an instance; wrap in the key
-            return et.Element(context.parent_entry.key)
+        par_entry = context.parent_entry
+        if par_entry:
+            if (
+                par_entry.type in KEYED_ITEM_TYPES
+            ):  # Encoding a list within an instance; wrap in the key
+                return et.Element(par_entry.key)
         return []
 
     def get_dict_root(self, *, context: Context) -> Union[et.Element, list, None]:
         tag = "dict"
         if (
-            context.parent_entry.type in KEYED_ITEM_TYPES
+            context.parent_entry and context.parent_entry.type in KEYED_ITEM_TYPES
         ):  # Encoding a dict within an instance
             tag = context.parent_entry.key
         elif context.curr_type in KEYED_ITEM_TYPES:
@@ -196,20 +198,28 @@ class Codec:
 
     def encode_primitive(self, obj, *, context: Context) -> List[et.Element]:
         if context.curr_type in ITEM_TYPES:
-            el = et.Element(str(context.curr_key))
+            el = et.Element(self.get_primitive_item_tag(obj, context=context))
             el.text = str(obj)
             return [el]
         raise NotImplementedError(
             f"Encoding primitive {obj} (type {type(obj)} in context {context.curr_type} not supported"
         )
 
+    def get_primitive_item_tag(self, obj, *, context: Context) -> str:
+        if context.curr_type == Type.LIST_ITEM:
+            return "element"
+        return str(context.curr_key)
+
 
 DEFAULT_CODEC = Codec()
 
 
-def to_xml_string(obj, codec: Codec = None) -> str:
+def to_xml_string(obj, codec: Codec = None, root_tag: str = "document") -> str:
     if codec is None:
         codec = DEFAULT_CODEC
     els = codec.encode(obj)
-    assert len(els) == 1
+    if len(els) > 1:
+        root = et.Element(root_tag)
+        root.extend(els)
+        els = [root]
     return et.tostring(els[0], encoding="unicode")
