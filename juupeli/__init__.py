@@ -160,9 +160,9 @@ class Codec:
                 continue
 
             for obj in result:
-                if isinstance(result, Attribute):
+                if isinstance(obj, Attribute):
                     # TODO: crash more gracefully if `root` is a bare list
-                    root.attrib[result.key] = result.value
+                    root.attrib[obj.key] = obj.value
                 else:
                     root.append(obj)
 

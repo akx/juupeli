@@ -13,7 +13,7 @@ class CustomCodec(Codec):
 
     def encode_primitive(self, obj, *, context: Context) -> List[et.Element]:
         if isinstance(obj, (int, bool)) and context.parent_entry.type == Type.OBJECT:
-            return Attribute(context.curr_key, str(obj))
+            return [Attribute(context.curr_key, str(obj))]
         return super().encode_primitive(obj, context=context)
 
 
